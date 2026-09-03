@@ -22,6 +22,25 @@ function saveSession(code, name) {
     myName = name;
     sessionStorage.setItem('impostorName', name);
   }
+  setRoomHash(code);
+}
+
+function roomUrl(code) {
+  return `${location.origin}${location.pathname}#/room/${code}`;
+}
+
+function setRoomHash(code) {
+  if (!code) return;
+  if (location.hash !== `#/room/${code}`) history.replaceState(null, '', `#/room/${code}`);
+}
+
+function clearRoomHash() {
+  history.replaceState(null, '', location.pathname);
+}
+
+function hashRoomCode() {
+  const m = location.hash.match(/#\/room\/([A-Za-z0-9]{5})/);
+  return m ? m[1].toUpperCase() : null;
 }
 
 socket.on('connect', () => {
@@ -49,12 +68,35 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 2600);
 }
 
-// prefill name after refresh
+// prefill from session or shared link
 if (myName) {
   $('createName').value = myName;
   $('joinName').value = myName;
 }
-if (roomCode) $('joinCode').value = roomCode;
+const linkedCode = hashRoomCode();
+if (linkedCode) {
+  roomCode = roomCode || linkedCode;
+  $('joinCode').value = linkedCode;
+  if (!myToken || sessionStorage.getItem('impostorCode') !== linkedCode) {
+    setTimeout(() => toast(`Room ${linkedCode} — enter your name to join.`), 400);
+    setTimeout(() => $('joinName').focus(), 600);
+  }
+} else if (roomCode) {
+  $('joinCode').value = roomCode;
+}
+
+window.addEventListener('hashchange', () => {
+  const code = hashRoomCode();
+  if (code && code !== roomCode) {
+    $('joinCode').value = code;
+    show('screen-home');
+    toast(`Room ${code} — enter your name to join.`);
+  } else if (!code && roomCode) {
+    // user hit back while in a room: keep them in the room, restore hash
+    if (document.querySelector('.screen.active') !== $('screen-home')) setRoomHash(roomCode);
+    else $('joinCode').value = '';
+  }
+});
 
 $('btnCreate').onclick = () => {
   const name = $('createName').value.trim() || 'Host';
@@ -72,11 +114,16 @@ $('btnLeave').onclick = () => {
   sessionStorage.removeItem('impostorCode');
   sessionStorage.removeItem('impostorToken');
   sessionStorage.removeItem('impostorName');
+  clearRoomHash();
   location.reload();
 };
 $('btnCopy').onclick = async () => {
-  try { await navigator.clipboard.writeText(roomCode); toast('Code copied.'); }
-  catch { toast(roomCode); }
+  const link = roomUrl(roomCode);
+  try { await navigator.clipboard.writeText(link); toast('Invite link copied.'); }
+  catch {
+    try { await navigator.clipboard.writeText(roomCode); toast('Code copied.'); }
+    catch { toast(roomCode); }
+  }
 };
 $('btnStart').onclick = () => socket.emit('start-game', { code: roomCode, difficulty: $('difficulty').value });
 $('btnToDiscuss').onclick = () => { show('screen-discuss'); startTimer(60); };
@@ -165,6 +212,7 @@ socket.on('rejoin-failed', () => {
   sessionStorage.removeItem('impostorCode');
   sessionStorage.removeItem('impostorToken');
   roomCode = null;
+  clearRoomHash();
   show('screen-home');
   toast('Could not rejoin. Room may have closed.');
 });
