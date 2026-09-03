@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>IMPOSTOR — party word game</title>
+<link rel="stylesheet" href="/styles.css" />
+<script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+<!-- Hallmark · macrostructure: Workbench · theme: Midnight · nav: N1b · footer: Ft5 statement -->
+<!-- Genre: playful · Audience: friends on voice call · Use: start a game in 30s · Tone: playful -->
+<!-- Pre-emit critique: P5 H4 E5 S4 R5 V5 -->
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="wordmark">IMPO<span>STOR</span></div>
+    <nav class="topnav">
+      <a href="#how">How to play</a>
+      <a href="#words">155 words</a>
+      <span class="dot-status" id="connDot" title="server connection">●</span>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- HOME -->
+  <section id="screen-home" class="screen active">
+    <div class="hero-grid">
+      <div class="hero-copy">
+        <p class="kicker">Voice-call party game · 3–12 players</p>
+        <h1>One of you is lying about this word.</h1>
+        <p class="lede">Everyone else sees the secret word. The impostor sees only vague hints. Talk it out, then vote.</p>
+        <div class="rules-inline">
+          <div><strong>1.</strong> Share the room code</div>
+          <div><strong>2.</strong> Describe without saying it</div>
+          <div><strong>3.</strong> Find the impostor</div>
+        </div>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <h2>Create room</h2>
+          <label>Your name<input id="createName" maxlength="20" placeholder="e.g. Nakul" autocomplete="off" /></label>
+          <button id="btnCreate" class="btn primary">Create game</button>
+        </div>
+        <div class="card">
+          <h2>Join room</h2>
+          <label>Your name<input id="joinName" maxlength="20" placeholder="e.g. Priya" autocomplete="off" /></label>
+          <label>Room code<input id="joinCode" maxlength="5" placeholder="K7XQ2" autocomplete="off" class="code-input" /></label>
+          <button id="btnJoin" class="btn">Join game</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="how" class="how">
+      <div class="how-item"><strong>Non-impostors</strong><span>You see the word. Give vague clues, never say it.</span></div>
+      <div class="how-item"><strong>Impostor</strong><span>You see 4 hints only. Blend in. Fake confidence.</span></div>
+      <div class="how-item"><strong>Vote</strong><span>Majority picks one suspect. Catch the impostor to win.</span></div>
+    </div>
+    <p id="words" class="muted small">133 words · easy / medium / hard · runs on voice call (Discord, phone, etc.)</p>
+  </section>
+
+  <!-- LOBBY -->
+  <section id="screen-lobby" class="screen">
+    <div class="lobby-head">
+      <div>
+        <p class="kicker">Room code — share it</p>
+        <div class="roomcode" id="roomCode">–––––</div>
+      </div>
+      <button id="btnLeave" class="btn ghost">Leave</button>
+    </div>
+    <div class="card">
+      <h2>Players (<span id="playerCount">0</span>)</h2>
+      <ul id="playerList" class="players"></ul>
+      <p class="muted small" id="lobbyHint">Need at least 3 to start. Host starts the round.</p>
+      <label id="diffWrap">Difficulty
+        <select id="difficulty">
+          <option value="mixed" selected>Mixed</option>
+          <option value="easy">Easy</option>
+          <option value="medium">Medium</option>
+          <option value="hard">Hard</option>
+        </select>
+      </label>
+      <div class="row">
+        <button id="btnStart" class="btn primary">Start round</button>
+        <button id="btnCopy" class="btn">Copy code</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- WORD REVEAL -->
+  <section id="screen-word" class="screen">
+    <p class="kicker">Your secret</p>
+    <div class="card big-center" id="wordCard"></div>
+    <div class="row center">
+      <button id="btnToDiscuss" class="btn primary">Start discussion (60s)</button>
+    </div>
+    <p class="muted small center">Talk on your voice call. Don't say the word out loud.</p>
+  </section>
+
+  <!-- DISCUSSION -->
+  <section id="screen-discuss" class="screen">
+    <p class="kicker">Discuss — who sounds suspicious?</p>
+    <div class="timer" id="timer">01:00</div>
+    <div class="card">
+      <h2>Reminder</h2>
+      <p id="discussHint" class="muted">Describe your word vaguely. Impostor: fake it.</p>
+    </div>
+    <div class="row center">
+      <button id="btnToVote" class="btn primary">Go to vote</button>
+    </div>
+  </section>
+
+  <!-- VOTING -->
+  <section id="screen-vote" class="screen">
+    <p class="kicker">Vote — who is the impostor?</p>
+    <div class="card">
+      <ul id="voteList" class="players vote"></ul>
+    </div>
+    <p class="muted small center" id="voteStatus"></p>
+  </section>
+
+  <!-- RESULTS -->
+  <section id="screen-results" class="screen">
+    <p class="kicker">Round results</p>
+    <div class="card big-center" id="resultsCard"></div>
+    <div class="row center">
+      <button id="btnNext" class="btn primary">Back to lobby</button>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap footer-inner">
+    <strong>Talk first. Vote after.</strong>
+    <span class="muted">IMPOSTOR is best with voice on. No account, no setup.</span>
+  </div>
+</footer>
+
+<div id="toast" class="toast" role="alert"></div>
+
+<script src="/client.js"></script>
+</body>
+</html>

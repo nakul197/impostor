@@ -1,0 +1,20 @@
+[
+  {
+    "date": "2026-09-04",
+    "macrostructure": "Workbench",
+    "theme": "Midnight",
+    "nav": "N1b canonical",
+    "footer": "Ft5 statement",
+    "enrichment": "none",
+    "brief": "IMPOSTOR Express+Socket.io UI first: home, lobby, word reveal, discuss, vote, results"
+  },
+  {
+    "date": "2026-08-30",
+    "macrostructure": "Marquee Hero",
+    "theme": "Hum",
+    "nav": "N5 Floating pill",
+    "footer": "Ft8 Mini logo",
+    "enrichment": "none",
+    "brief": "Multiplayer Word Game - A fun social word-guessing game for friends"
+  }
+]

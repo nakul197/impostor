@@ -1,0 +1,161 @@
+const socket = io();
+let myId = null;
+let roomCode = null;
+let isHost = false;
+let timerInt = null;
+
+socket.on('connect', () => {
+  myId = socket.id;
+  document.getElementById('connDot').classList.add('on');
+});
+socket.on('disconnect', () => {
+  document.getElementById('connDot').classList.remove('on');
+});
+
+const $ = (id) => document.getElementById(id);
+const screens = ['screen-home', 'screen-lobby', 'screen-word', 'screen-discuss', 'screen-vote', 'screen-results'];
+function show(id) {
+  screens.forEach((s) => $(s).classList.toggle('active', s === id));
+  window.scrollTo(0, 0);
+}
+function toast(msg) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2600);
+}
+
+$('btnCreate').onclick = () => {
+  const name = $('createName').value.trim() || 'Host';
+  socket.emit('create-game', { name });
+};
+$('btnJoin').onclick = () => {
+  const name = $('joinName').value.trim() || 'Player';
+  const code = $('joinCode').value.trim().toUpperCase();
+  if (!code) return toast('Enter a room code.');
+  socket.emit('join-game', { code, name });
+};
+$('btnLeave').onclick = () => { location.reload(); };
+$('btnCopy').onclick = async () => {
+  try { await navigator.clipboard.writeText(roomCode); toast('Code copied.'); }
+  catch { toast(roomCode); }
+};
+$('btnStart').onclick = () => socket.emit('start-game', { code: roomCode, difficulty: $('difficulty').value });
+$('btnToDiscuss').onclick = () => { show('screen-discuss'); startTimer(60); };
+$('btnToVote').onclick = () => { clearInterval(timerInt); show('screen-vote'); };
+$('btnNext').onclick = () => socket.emit('next-round', { code: roomCode });
+
+function renderPlayers(players) {
+  const list = $('playerList');
+  list.innerHTML = '';
+  $('playerCount').textContent = players.length;
+  players.forEach((p) => {
+    const li = document.createElement('li');
+    const left = document.createElement('span');
+    left.textContent = `${p.name}${p.id === myId ? ' (you)' : ''} · ${p.score || 0} pts`;
+    li.appendChild(left);
+    if (p.isHost) {
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = 'HOST';
+      li.appendChild(b);
+    }
+    list.appendChild(li);
+  });
+  const me = players.find((p) => p.id === myId);
+  isHost = !!(me && me.isHost);
+  $('btnStart').disabled = !isHost;
+  $('diffWrap').style.display = isHost ? '' : 'none';
+  $('lobbyHint').textContent = isHost
+    ? 'You are host. Need at least 3 to start.'
+    : 'Waiting for host to start…';
+  renderVoteList(players);
+}
+
+function renderVoteList(players) {
+  const list = $('voteList');
+  list.innerHTML = '';
+  players.filter((p) => p.id !== myId).forEach((p) => {
+    const li = document.createElement('li');
+    li.textContent = p.name;
+    li.onclick = () => {
+      list.querySelectorAll('li').forEach((el) => el.classList.remove('picked'));
+      li.classList.add('picked');
+      socket.emit('submit-vote', { code: roomCode, votedId: p.id });
+      $('voteStatus').textContent = `Voted for ${p.name}. Waiting for others…`;
+    };
+    list.appendChild(li);
+  });
+}
+
+function startTimer(secs) {
+  clearInterval(timerInt);
+  let s = secs;
+  const el = $('timer');
+  const tick = () => {
+    el.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+    if (s <= 0) { clearInterval(timerInt); show('screen-vote'); }
+    s--;
+  };
+  tick();
+  timerInt = setInterval(tick, 1000);
+}
+
+socket.on('game-created', ({ code, players }) => {
+  roomCode = code;
+  $('roomCode').textContent = code;
+  renderPlayers(players);
+  show('screen-lobby');
+});
+socket.on('game-joined', ({ code, players }) => {
+  roomCode = code;
+  $('roomCode').textContent = code;
+  renderPlayers(players);
+  show('screen-lobby');
+});
+socket.on('players-updated', ({ players }) => renderPlayers(players));
+
+socket.on('round-started', ({ code, isImpostor, word, hints, difficulty, players }) => {
+  roomCode = code;
+  renderPlayers(players);
+  const card = $('wordCard');
+  if (isImpostor) {
+    card.innerHTML = `<p class="kicker" style="margin-top:0">You are the IMPOSTOR</p>
+      <div class="secret">???</div>
+      <p class="muted">You get hints only. Blend in.</p>
+      <ul>${hints.map((h) => `<li>${h}</li>`).join('')}</ul>
+      <p class="muted small">Difficulty: ${difficulty}</p>`;
+    $('discussHint').textContent = 'You are the impostor. Stay vague, agree a lot, deflect.';
+  } else {
+    card.innerHTML = `<p class="kicker" style="margin-top:0">Your word — keep it secret</p>
+      <div class="secret">${word}</div>
+      <p class="muted">Describe it vaguely. Never say it. Difficulty: ${difficulty}</p>`;
+    $('discussHint').textContent = `Describe "${word}" vaguely. Never say it out loud.`;
+  }
+  show('screen-word');
+});
+
+socket.on('votes-updated', ({ count, total }) => {
+  $('voteStatus').textContent = `Votes in: ${count}/${total}`;
+});
+
+socket.on('round-results', ({ word, difficulty, impostorName, caught, votedOutId, tied, players }) => {
+  const names = Object.fromEntries(players.map((p) => [p.id, p.name]));
+  const votedName = tied ? 'Tie — no one' : (names[votedOutId] || '—');
+  const board = [...players].sort((a, b) => (b.score || 0) - (a.score || 0))
+    .map((p) => `<li><span>${p.name}</span><span>${p.score || 0} pts</span></li>`).join('');
+  $('resultsCard').innerHTML = `
+    <div class="secret">${caught ? 'Caught!' : 'Escaped!'}</div>
+    <p>The word was <strong>${word}</strong> (${difficulty}). Impostor was <strong>${impostorName}</strong>.</p>
+    <p class="muted">Voted out: ${votedName} · ${caught ? 'Crew +1 each.' : 'Impostor +2.'}</p>
+    <ul class="players">${board}</ul>`;
+  $('btnNext').style.display = isHost ? '' : 'none';
+  show('screen-results');
+});
+
+socket.on('back-to-lobby', ({ players }) => {
+  renderPlayers(players);
+  show('screen-lobby');
+});
+
+socket.on('error-msg', (msg) => toast(msg));
