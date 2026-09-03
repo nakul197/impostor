@@ -22,6 +22,14 @@ function makeCode() {
   return games.has(code) ? makeCode() : code;
 }
 
+function makeToken() {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+function cleanName(n) {
+  return (n || 'Player').toString().slice(0, 20) || 'Player';
+}
+
 function pickWord(difficulty) {
   const pool = difficulty && difficulty !== 'mixed'
     ? WORDS.filter((w) => w.difficulty === difficulty)
@@ -30,13 +38,40 @@ function pickWord(difficulty) {
   return list[Math.floor(Math.random() * list.length)];
 }
 
+// stable ids: client votes/identifies by token, never socket.id
 function publicPlayers(game) {
   return game.players.map((p) => ({
-    id: p.id,
+    id: p.token,
     name: p.name,
-    isHost: p.isHost,
-    score: game.scores[p.id] || 0,
+    isHost: p.token === game.hostToken,
+    score: game.scores[p.token] || 0,
+    connected: p.connected,
   }));
+}
+
+function findBySocket(socketId) {
+  for (const game of games.values()) {
+    const player = game.players.find((p) => p.socketId === socketId);
+    if (player) return { game, player };
+  }
+  return {};
+}
+
+function emitToPlayer(player, event, data) {
+  if (player.socketId) io.to(player.socketId).emit(event, data);
+}
+
+function sendRoundState(game, player) {
+  if (!game.round) return;
+  const isImpostor = player.token === game.round.impostorToken;
+  emitToPlayer(player, 'round-started', {
+    code: game.code,
+    isImpostor,
+    word: isImpostor ? null : game.round.word,
+    hints: isImpostor ? game.round.hints : [],
+    difficulty: game.round.difficulty,
+    players: publicPlayers(game),
+  });
 }
 
 function finishRound(code) {
@@ -51,134 +86,182 @@ function finishRound(code) {
     if (n > topVotes) { topVotes = n; topId = id; tied = false; }
     else if (n === topVotes) { tied = true; }
   });
-  const impostor = game.players.find((p) => p.id === game.round.impostorId);
-  const caught = !tied && topId === game.round.impostorId;
-  // scoring: crew +1 each if caught, impostor +2 if escaped
+  const impostor = game.players.find((p) => p.token === game.round.impostorToken);
+  const caught = !tied && topId === game.round.impostorToken;
   if (caught) {
     game.players.forEach((p) => {
-      if (p.id !== game.round.impostorId) game.scores[p.id] = (game.scores[p.id] || 0) + 1;
+      if (p.token !== game.round.impostorToken) game.scores[p.token] = (game.scores[p.token] || 0) + 1;
     });
   } else if (impostor) {
-    game.scores[impostor.id] = (game.scores[impostor.id] || 0) + 2;
+    game.scores[impostor.token] = (game.scores[impostor.token] || 0) + 2;
   }
   game.status = 'RESULTS';
-  io.to(code).emit('round-results', {
+  const payload = {
     word: game.round.word,
     difficulty: game.round.difficulty,
     impostorName: impostor ? impostor.name : '???',
-    impostorId: game.round.impostorId,
+    impostorId: game.round.impostorToken,
     votedOutId: tied ? null : topId,
     tied,
     caught,
     tally,
     players: publicPlayers(game),
-  });
+  };
+  game.lastResults = payload;
+  io.to(code).emit('round-results', payload);
 }
 
 io.on('connection', (socket) => {
-  socket.on('create-game', ({ name }) => {
+  socket.on('create-game', ({ name, token }) => {
     const code = makeCode();
+    const playerToken = (token || makeToken()).toString().slice(0, 16);
     const game = {
       code,
-      hostId: socket.id,
+      hostToken: playerToken,
       status: 'LOBBY',
-      players: [{ id: socket.id, name: (name || 'Host').slice(0, 20), isHost: true }],
-      scores: { [socket.id]: 0 },
+      players: [{ token: playerToken, socketId: socket.id, name: cleanName(name), connected: true }],
+      scores: { [playerToken]: 0 },
       round: null,
+      lastResults: null,
+      cleanupTimer: null,
     };
     games.set(code, game);
     socket.join(code);
-    socket.emit('game-created', { code, players: publicPlayers(game) });
+    socket.emit('game-created', { code, token: playerToken, players: publicPlayers(game) });
   });
 
-  socket.on('join-game', ({ code, name }) => {
+  socket.on('join-game', ({ code, name, token }) => {
     code = (code || '').toUpperCase().trim();
     const game = games.get(code);
     if (!game) return socket.emit('error-msg', 'Room not found. Check the code.');
+    const playerToken = (token || makeToken()).toString().slice(0, 16);
+    const existing = game.players.find((p) => p.token === playerToken);
+    if (existing) {
+      // reclaim same seat (refresh before joining fully)
+      existing.socketId = socket.id;
+      existing.connected = true;
+      existing.name = cleanName(name || existing.name);
+      if (game.cleanupTimer) { clearTimeout(game.cleanupTimer); game.cleanupTimer = null; }
+      socket.join(code);
+      socket.emit('game-joined', { code, token: playerToken, players: publicPlayers(game) });
+      io.to(code).emit('players-updated', { players: publicPlayers(game) });
+      if (game.status !== 'LOBBY' && game.round) sendRoundState(game, existing);
+      else if (game.status === 'RESULTS' && game.lastResults) {
+        emitToPlayer(existing, 'round-results', game.lastResults);
+      }
+      return;
+    }
     if (game.status !== 'LOBBY') return socket.emit('error-msg', 'Round in progress. Wait for lobby.');
     if (game.players.length >= 12) return socket.emit('error-msg', 'Room is full.');
-    game.players.push({ id: socket.id, name: (name || 'Player').slice(0, 20), isHost: false });
-    game.scores[socket.id] = 0;
+    game.players.push({ token: playerToken, socketId: socket.id, name: cleanName(name), connected: true });
+    game.scores[playerToken] = 0;
+    if (game.cleanupTimer) { clearTimeout(game.cleanupTimer); game.cleanupTimer = null; }
     socket.join(code);
     io.to(code).emit('players-updated', { players: publicPlayers(game) });
-    socket.emit('game-joined', { code, players: publicPlayers(game) });
+    socket.emit('game-joined', { code, token: playerToken, players: publicPlayers(game) });
+  });
+
+  // explicit rejoin after refresh: restores seat + current phase
+  socket.on('rejoin-game', ({ code, token }) => {
+    code = (code || '').toUpperCase().trim();
+    const game = games.get(code);
+    if (!game || !token) return socket.emit('rejoin-failed', {});
+    const player = game.players.find((p) => p.token === token);
+    if (!player) return socket.emit('rejoin-failed', {});
+    player.socketId = socket.id;
+    player.connected = true;
+    if (game.cleanupTimer) { clearTimeout(game.cleanupTimer); game.cleanupTimer = null; }
+    socket.join(code);
+    socket.emit('game-joined', { code, token, players: publicPlayers(game), rejoined: true });
+    io.to(code).emit('players-updated', { players: publicPlayers(game) });
+    if (game.status === 'RESULTS' && game.lastResults) {
+      emitToPlayer(player, 'round-results', game.lastResults);
+    } else if (game.round) {
+      sendRoundState(game, player);
+      const votes = game.round.votes;
+      if (votes[token]) {
+        emitToPlayer(player, 'votes-updated', {
+          count: Object.keys(votes).length,
+          total: game.players.filter((p) => p.connected).length || game.players.length,
+        });
+      }
+    }
   });
 
   socket.on('start-game', ({ code, difficulty }) => {
-    const game = games.get(code);
-    if (!game || socket.id !== game.hostId) return;
+    const { game, player } = findBySocket(socket.id);
+    if (!game || !player || code !== game.code) return;
+    if (player.token !== game.hostToken) return;
     if (game.status !== 'LOBBY') return socket.emit('error-msg', 'Round already in progress.');
-    if (game.players.length < 3) return socket.emit('error-msg', 'Need at least 3 players to start.');
+    const active = game.players.filter((p) => p.connected);
+    if (active.length < 3) return socket.emit('error-msg', 'Need at least 3 connected players.');
     const allowed = ['easy', 'medium', 'hard', 'mixed'];
     const diff = allowed.includes(difficulty) ? difficulty : 'mixed';
     const wordEntry = pickWord(diff);
-    const impostorIdx = Math.floor(Math.random() * game.players.length);
+    const impostor = active[Math.floor(Math.random() * active.length)];
     game.status = 'WORD_REVEAL';
+    game.lastResults = null;
     game.round = {
       word: wordEntry.word,
       hints: wordEntry.hints,
       difficulty: wordEntry.difficulty,
-      impostorId: game.players[impostorIdx].id,
+      impostorToken: impostor.token,
       votes: {},
     };
-    game.players.forEach((p, idx) => {
-      const isImpostor = idx === impostorIdx;
-      io.to(p.id).emit('round-started', {
-        code,
-        isImpostor,
-        word: isImpostor ? null : wordEntry.word,
-        hints: isImpostor ? wordEntry.hints : [],
-        difficulty: wordEntry.difficulty,
-        players: publicPlayers(game),
-      });
-    });
+    game.players.forEach((p) => { if (p.connected) sendRoundState(game, p); });
   });
 
   socket.on('submit-vote', ({ code, votedId }) => {
-    const game = games.get(code);
-    if (!game || !game.round) return;
-    if (!game.players.some((p) => p.id === votedId)) return;
-    if (votedId === socket.id) return socket.emit('error-msg', 'You cannot vote for yourself.');
-    game.round.votes[socket.id] = votedId;
-    const totalVotes = Object.keys(game.round.votes).length;
-    io.to(code).emit('votes-updated', { count: totalVotes, total: game.players.length });
-    if (totalVotes >= game.players.length) finishRound(code);
+    const { game, player } = findBySocket(socket.id);
+    if (!game || !player || code !== game.code) return;
+    if (!game.round) return;
+    if (!game.players.some((p) => p.token === votedId)) return;
+    if (votedId === player.token) return socket.emit('error-msg', 'You cannot vote for yourself.');
+    game.round.votes[player.token] = votedId;
+    const connectedCount = game.players.filter((p) => p.connected).length;
+    io.to(code).emit('votes-updated', {
+      count: Object.keys(game.round.votes).length,
+      total: connectedCount,
+    });
+    if (Object.keys(game.round.votes).length >= connectedCount) finishRound(code);
   });
 
   socket.on('next-round', ({ code }) => {
-    const game = games.get(code);
-    if (!game || socket.id !== game.hostId) return;
+    const { game, player } = findBySocket(socket.id);
+    if (!game || !player || code !== game.code) return;
+    if (player.token !== game.hostToken) return;
     game.status = 'LOBBY';
     game.round = null;
+    game.lastResults = null;
     io.to(code).emit('back-to-lobby', { players: publicPlayers(game) });
   });
 
   socket.on('disconnect', () => {
-    for (const [code, game] of games) {
-      const idx = game.players.findIndex((p) => p.id === socket.id);
-      if (idx !== -1) {
-        game.players.splice(idx, 1);
-        delete game.scores[socket.id];
-        if (game.round) delete game.round.votes[socket.id];
-        if (game.players.length === 0) {
-          games.delete(code);
-        } else {
-          if (socket.id === game.hostId) {
-            game.hostId = game.players[0].id;
-            game.players[0].isHost = true;
-          }
-          io.to(code).emit('players-updated', { players: publicPlayers(game) });
-          // if everyone remaining has voted, finish early
-          if (game.round && Object.keys(game.round.votes).length >= game.players.length) {
-            finishRound(code);
-          } else if (game.round) {
-            io.to(code).emit('votes-updated', {
-              count: Object.keys(game.round.votes).length,
-              total: game.players.length,
-            });
-          }
-        }
-      }
+    const { game, player } = findBySocket(socket.id);
+    if (!game || !player) return;
+    player.connected = false;
+    player.socketId = null;
+    const connected = game.players.filter((p) => p.connected);
+    // host left: pass to first connected player
+    if (player.token === game.hostToken && connected.length) {
+      game.hostToken = connected[0].token;
+    }
+    io.to(game.code).emit('players-updated', { players: publicPlayers(game) });
+    if (game.round) {
+      const votes = game.round.votes;
+      io.to(game.code).emit('votes-updated', {
+        count: Object.keys(votes).length,
+        total: connected.length || 1,
+      });
+      if (connected.length && Object.keys(votes).length >= connected.length) finishRound(game.code);
+    }
+    // delete empty rooms after 5 min (allows everyone to refresh at once)
+    if (!connected.length) {
+      if (game.cleanupTimer) clearTimeout(game.cleanupTimer);
+      game.cleanupTimer = setTimeout(() => {
+        const g = games.get(game.code);
+        if (g && !g.players.some((p) => p.connected)) games.delete(game.code);
+      }, 5 * 60 * 1000);
     }
   });
 });
