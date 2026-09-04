@@ -28,7 +28,7 @@ npm run dev
    - a random word (filtered by difficulty if host set one)
    - a random impostor
 4. Non-impostors get the word. Impostor gets 4 vague hints + "You are IMPOSTOR".
-5. **Discussion** (60s client timer, host can skip to vote early).
+5. **Discussion** (60s client timer, host can skip to vote early). Server deals a shuffled speaking order with a random first speaker; anyone taps Next speaker to move the turn along, synced for all.
 6. **Vote**: everyone votes one suspect. When all votes are in, server tallies.
    - Tie = impostor escapes.
 7. **Results** show word, impostor, who got voted out, running scores.
@@ -55,8 +55,8 @@ multiplayer-word-game/
 
 ## Socket events
 
-- Client → server: `create-game {name,token}`, `join-game {code,name,token}`, `rejoin-game {code,token}` (auto-sent on every reconnect, refresh-safe), `start-game {code,difficulty}`, `submit-vote {code,votedId}`, `next-round {code}`
-- Server → client: `game-created`, `game-joined`, `players-updated`, `round-started {isImpostor,word,hints}`, `vote-accepted {votedName}` (a vote only counts once this arrives), `votes-updated {count,total,voted[]}`, `round-results {word,impostorName,caught,votedOutId,scores}`, `back-to-lobby`, `rejoin-failed`, `error-msg`
+- Client → server: `create-game {name,token}`, `join-game {code,name,token}`, `rejoin-game {code,token}` (auto-sent on every reconnect, refresh-safe), `start-game {code,difficulty}`, `advance-turn {code}`, `submit-vote {code,votedId}`, `next-round {code}`
+- Server → client: `game-created`, `game-joined`, `players-updated`, `round-started {isImpostor,word,hints,speakOrder,turnIndex}`, `turn-updated {order,index}`, `vote-accepted {votedName}` (a vote only counts once this arrives), `votes-updated {count,total,voted[]}`, `round-results {word,impostorName,caught,votedOutId,scores}`, `back-to-lobby`, `rejoin-failed`, `error-msg`
 
 ## Notes
 

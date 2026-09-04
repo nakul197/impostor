@@ -58,7 +58,7 @@
       <div class="how-item"><strong>Impostor</strong><span>You see 4 hints only. Blend in. Fake confidence.</span></div>
       <div class="how-item"><strong>Vote</strong><span>Majority picks one suspect. Catch the impostor to win.</span></div>
     </div>
-    <p id="words" class="muted small">133 words · easy / medium / hard · runs on voice call (Discord, phone, etc.)</p>
+    <p id="words" class="muted small">213 words · easy / medium / hard · runs on voice call (Discord, phone, etc.)</p>
   </section>
 
   <!-- LOBBY -->
@@ -106,6 +106,14 @@
     <div class="card">
       <h2>Reminder</h2>
       <p id="discussHint" class="muted">Describe your word vaguely. Impostor: fake it.</p>
+    </div>
+    <div class="card">
+      <h2>Speaking order</h2>
+      <p class="muted" id="turnCurrent">Waiting for round…</p>
+      <ol id="turnList" class="turns"></ol>
+      <div class="row">
+        <button id="btnNextSpeaker" class="btn">Next speaker →</button>
+      </div>
     </div>
     <div class="row center">
       <button id="btnToVote" class="btn primary">Go to vote</button>

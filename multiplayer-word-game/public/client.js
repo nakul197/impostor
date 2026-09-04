@@ -7,6 +7,8 @@ let timerInt = null;
 let myVote = null;
 let lastPlayers = [];
 let lastVoteInfo = null;
+let lastOrder = [];
+let lastTurnIndex = 0;
 
 function getToken() {
   if (!myToken) {
@@ -129,6 +131,25 @@ $('btnStart').onclick = () => socket.emit('start-game', { code: roomCode, diffic
 $('btnToDiscuss').onclick = () => { show('screen-discuss'); startTimer(60); };
 $('btnToVote').onclick = () => { clearInterval(timerInt); show('screen-vote'); };
 $('btnNext').onclick = () => socket.emit('next-round', { code: roomCode });
+$('btnNextSpeaker').onclick = () => socket.emit('advance-turn', { code: roomCode });
+
+function renderTurns() {
+  const list = $('turnList');
+  if (!list) return;
+  const byId = Object.fromEntries((lastPlayers || []).map((p) => [p.id, p]));
+  list.innerHTML = '';
+  lastOrder.forEach((tok, i) => {
+    const p = byId[tok];
+    const li = document.createElement('li');
+    if (i === lastTurnIndex) li.classList.add('current');
+    li.textContent = `${p ? p.name : '?'}${tok === myToken ? ' (you)' : ''}${i === 0 ? ' · starts' : ''}${p && p.connected === false ? ' · offline' : ''}`;
+    list.appendChild(li);
+  });
+  const cur = byId[lastOrder[lastTurnIndex]];
+  $('turnCurrent').textContent = cur
+    ? `Speaking now: ${cur.name}${lastOrder[lastTurnIndex] === myToken ? ' (you!)' : ''}`
+    : (lastOrder.length ? '' : 'Waiting for round…');
+}
 
 function renderVoteStatus() {
   if (!lastVoteInfo) return;
@@ -171,6 +192,7 @@ function renderPlayers(players) {
     : 'Waiting for host to start…';
   renderVoteList(players);
   renderVoteStatus();
+  renderTurns();
 }
 
 function renderVoteList(players) {
@@ -235,12 +257,15 @@ socket.on('rejoin-failed', () => {
   toast('Could not rejoin. Room may have closed.');
 });
 
-socket.on('round-started', ({ code, isImpostor, word, hints, difficulty, players }) => {
+socket.on('round-started', ({ code, isImpostor, word, hints, difficulty, players, speakOrder, turnIndex }) => {
   saveSession(code);
   myVote = null;
   lastVoteInfo = null;
   $('voteStatus').textContent = '';
+  lastOrder = speakOrder || [];
+  lastTurnIndex = turnIndex || 0;
   renderPlayers(players);
+  renderTurns();
   const card = $('wordCard');
   if (isImpostor) {
     card.innerHTML = `<p class="kicker" style="margin-top:0">You are the IMPOSTOR</p>
@@ -287,8 +312,17 @@ socket.on('back-to-lobby', ({ players }) => {
   myVote = null;
   lastVoteInfo = null;
   $('voteStatus').textContent = '';
+  lastOrder = [];
+  lastTurnIndex = 0;
   renderPlayers(players);
+  renderTurns();
   show('screen-lobby');
+});
+
+socket.on('turn-updated', ({ order, index }) => {
+  lastOrder = order || [];
+  lastTurnIndex = index || 0;
+  renderTurns();
 });
 
 socket.on('error-msg', (msg) => toast(msg));

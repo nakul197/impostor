@@ -71,6 +71,8 @@ function sendRoundState(game, player) {
     hints: isImpostor ? game.round.hints : [],
     difficulty: game.round.difficulty,
     players: publicPlayers(game),
+    speakOrder: game.round.speakOrder || [],
+    turnIndex: game.round.turnIndex || 0,
   });
 }
 
@@ -202,6 +204,12 @@ io.on('connection', (socket) => {
     const diff = allowed.includes(difficulty) ? difficulty : 'mixed';
     const wordEntry = pickWord(diff);
     const impostor = active[Math.floor(Math.random() * active.length)];
+    // shuffled speaking order, random first speaker
+    const order = active.map((p) => p.token);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
     game.status = 'WORD_REVEAL';
     game.lastResults = null;
     game.round = {
@@ -210,6 +218,8 @@ io.on('connection', (socket) => {
       difficulty: wordEntry.difficulty,
       impostorToken: impostor.token,
       votes: {},
+      speakOrder: order,
+      turnIndex: 0,
     };
     game.players.forEach((p) => { if (p.connected) sendRoundState(game, p); });
   });
@@ -231,6 +241,18 @@ io.on('connection', (socket) => {
       voted: Object.keys(game.round.votes),
     });
     if (Object.keys(game.round.votes).length >= connectedCount) finishRound(code);
+  });
+
+  // anyone in the room can move the speaking turn along (cooperative voice party)
+  socket.on('advance-turn', ({ code }) => {
+    const { game, player } = findBySocket(socket.id);
+    if (!game || !player || code !== game.code) return;
+    if (!game.round || !game.round.speakOrder || !game.round.speakOrder.length) return;
+    game.round.turnIndex = (game.round.turnIndex + 1) % game.round.speakOrder.length;
+    io.to(code).emit('turn-updated', {
+      order: game.round.speakOrder,
+      index: game.round.turnIndex,
+    });
   });
 
   socket.on('next-round', ({ code }) => {
