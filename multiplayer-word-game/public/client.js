@@ -4,7 +4,9 @@ let roomCode = sessionStorage.getItem('impostorCode') || null;
 let myName = sessionStorage.getItem('impostorName') || '';
 let isHost = false;
 let timerInt = null;
-let didAutoRejoin = false;
+let myVote = null;
+let lastPlayers = [];
+let lastVoteInfo = null;
 
 function getToken() {
   if (!myToken) {
@@ -45,11 +47,9 @@ function hashRoomCode() {
 
 socket.on('connect', () => {
   document.getElementById('connDot').classList.add('on');
-  // refresh recovery: same tab still has code+token in sessionStorage
-  if (!didAutoRejoin && roomCode && myToken) {
-    didAutoRejoin = true;
-    socket.emit('rejoin-game', { code: roomCode, token: myToken });
-  }
+  // seat recovery on every (re)connect: socket.io fires connect after
+  // refresh AND after auto-reconnect on network blips. Rejoin is idempotent.
+  if (roomCode && myToken) socket.emit('rejoin-game', { code: roomCode, token: myToken });
 });
 socket.on('disconnect', () => {
   document.getElementById('connDot').classList.remove('on');
@@ -130,7 +130,21 @@ $('btnToDiscuss').onclick = () => { show('screen-discuss'); startTimer(60); };
 $('btnToVote').onclick = () => { clearInterval(timerInt); show('screen-vote'); };
 $('btnNext').onclick = () => socket.emit('next-round', { code: roomCode });
 
+function renderVoteStatus() {
+  if (!lastVoteInfo) return;
+  const { count, total, voted } = lastVoteInfo;
+  const votedSet = new Set(voted || []);
+  const waiting = (lastPlayers || [])
+    .filter((p) => p.connected !== false && !votedSet.has(p.id))
+    .map((p) => `${p.name}${p.id === myToken ? ' (you)' : ''}`);
+  let txt = `Votes in: ${count}/${total}`;
+  if (myVote) txt = `You voted for ${myVote}. ` + txt;
+  if (waiting.length && count < total) txt += ` · waiting for: ${waiting.join(', ')}`;
+  $('voteStatus').textContent = txt;
+}
+
 function renderPlayers(players) {
+  lastPlayers = players;
   const list = $('playerList');
   list.innerHTML = '';
   $('playerCount').textContent = players.length;
@@ -156,6 +170,7 @@ function renderPlayers(players) {
     ? 'You are host. Need at least 3 connected to start.'
     : 'Waiting for host to start…';
   renderVoteList(players);
+  renderVoteStatus();
 }
 
 function renderVoteList(players) {
@@ -168,7 +183,7 @@ function renderVoteList(players) {
       list.querySelectorAll('li').forEach((el) => el.classList.remove('picked'));
       li.classList.add('picked');
       socket.emit('submit-vote', { code: roomCode, votedId: p.id });
-      $('voteStatus').textContent = `Voted for ${p.name}. Waiting for others…`;
+      $('voteStatus').textContent = `Sending vote for ${p.name}… (not counted until confirmed)`;
     };
     list.appendChild(li);
   });
@@ -194,6 +209,9 @@ function handleJoined({ code, token, players }) {
   }
   saveSession(code, $('createName').value.trim() || $('joinName').value.trim() || myName);
   $('roomCode').textContent = code;
+  myVote = null;
+  lastVoteInfo = null;
+  $('voteStatus').textContent = '';
   renderPlayers(players);
   // stay on current mid-round screen if server is resending state right after;
   // default to lobby (round-started / round-results events will move us forward)
@@ -219,6 +237,9 @@ socket.on('rejoin-failed', () => {
 
 socket.on('round-started', ({ code, isImpostor, word, hints, difficulty, players }) => {
   saveSession(code);
+  myVote = null;
+  lastVoteInfo = null;
+  $('voteStatus').textContent = '';
   renderPlayers(players);
   const card = $('wordCard');
   if (isImpostor) {
@@ -237,8 +258,14 @@ socket.on('round-started', ({ code, isImpostor, word, hints, difficulty, players
   show('screen-word');
 });
 
-socket.on('votes-updated', ({ count, total }) => {
-  $('voteStatus').textContent = `Votes in: ${count}/${total}`;
+socket.on('votes-updated', (info) => {
+  lastVoteInfo = info;
+  renderVoteStatus();
+});
+
+socket.on('vote-accepted', ({ votedName }) => {
+  myVote = votedName;
+  renderVoteStatus();
 });
 
 socket.on('round-results', ({ word, difficulty, impostorName, caught, votedOutId, tied, players }) => {
@@ -257,6 +284,9 @@ socket.on('round-results', ({ word, difficulty, impostorName, caught, votedOutId
 });
 
 socket.on('back-to-lobby', ({ players }) => {
+  myVote = null;
+  lastVoteInfo = null;
+  $('voteStatus').textContent = '';
   renderPlayers(players);
   show('screen-lobby');
 });

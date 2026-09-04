@@ -179,11 +179,14 @@ io.on('connection', (socket) => {
     } else if (game.round) {
       sendRoundState(game, player);
       const votes = game.round.votes;
+      emitToPlayer(player, 'votes-updated', {
+        count: Object.keys(votes).length,
+        total: game.players.filter((p) => p.connected).length || game.players.length,
+        voted: Object.keys(votes),
+      });
       if (votes[token]) {
-        emitToPlayer(player, 'votes-updated', {
-          count: Object.keys(votes).length,
-          total: game.players.filter((p) => p.connected).length || game.players.length,
-        });
+        const target = game.players.find((p) => p.token === votes[token]);
+        emitToPlayer(player, 'vote-accepted', { votedName: target ? target.name : '?' });
       }
     }
   });
@@ -213,15 +216,19 @@ io.on('connection', (socket) => {
 
   socket.on('submit-vote', ({ code, votedId }) => {
     const { game, player } = findBySocket(socket.id);
-    if (!game || !player || code !== game.code) return;
-    if (!game.round) return;
-    if (!game.players.some((p) => p.token === votedId)) return;
+    if (!game || !player) return socket.emit('error-msg', 'Not in a room. Refresh to rejoin.');
+    if (code !== game.code) return socket.emit('error-msg', 'Wrong room. Refresh to rejoin.');
+    if (!game.round) return socket.emit('error-msg', 'No round in progress.');
+    if (!game.players.some((p) => p.token === votedId)) return socket.emit('error-msg', 'Invalid vote.');
     if (votedId === player.token) return socket.emit('error-msg', 'You cannot vote for yourself.');
     game.round.votes[player.token] = votedId;
+    const target = game.players.find((p) => p.token === votedId);
+    socket.emit('vote-accepted', { votedName: target ? target.name : '?' });
     const connectedCount = game.players.filter((p) => p.connected).length;
     io.to(code).emit('votes-updated', {
       count: Object.keys(game.round.votes).length,
       total: connectedCount,
+      voted: Object.keys(game.round.votes),
     });
     if (Object.keys(game.round.votes).length >= connectedCount) finishRound(code);
   });
@@ -252,6 +259,7 @@ io.on('connection', (socket) => {
       io.to(game.code).emit('votes-updated', {
         count: Object.keys(votes).length,
         total: connected.length || 1,
+        voted: Object.keys(votes),
       });
       if (connected.length && Object.keys(votes).length >= connected.length) finishRound(game.code);
     }

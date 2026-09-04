@@ -6,7 +6,7 @@ Voice-call social deduction for 3–12 players. Most players see the secret word
 
 - **Server**: Node + Express + Socket.io (`server/index.js`)
 - **Client**: vanilla HTML/CSS/JS (`public/`)
-- **Words**: 133 entries with difficulty + hints (`server/words.js`)
+- **Words**: 213 entries with difficulty + hints (`server/words.js`)
 - No database, no accounts, no build step.
 
 ## Run
@@ -55,8 +55,8 @@ multiplayer-word-game/
 
 ## Socket events
 
-- Client → server: `create-game {name}`, `join-game {code,name}`, `start-game {code,difficulty}`, `submit-vote {code,votedId}`, `next-round {code}`
-- Server → client: `game-created`, `game-joined`, `players-updated`, `round-started {isImpostor,word,hints}`, `votes-updated {count,total}`, `round-results {word,impostorName,caught,votedOutId,scores}`, `back-to-lobby`, `error-msg`
+- Client → server: `create-game {name,token}`, `join-game {code,name,token}`, `rejoin-game {code,token}` (auto-sent on every reconnect, refresh-safe), `start-game {code,difficulty}`, `submit-vote {code,votedId}`, `next-round {code}`
+- Server → client: `game-created`, `game-joined`, `players-updated`, `round-started {isImpostor,word,hints}`, `vote-accepted {votedName}` (a vote only counts once this arrives), `votes-updated {count,total,voted[]}`, `round-results {word,impostorName,caught,votedOutId,scores}`, `back-to-lobby`, `rejoin-failed`, `error-msg`
 
 ## Notes
 
